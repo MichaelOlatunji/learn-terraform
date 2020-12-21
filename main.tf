@@ -1,4 +1,10 @@
 terraform {
+  backend "remote" {
+    organization = "imyke"
+    workspaces {
+      name = "learn-terraform"
+    }
+  }
   required_providers {
     aws = {
       source  = "hashicorp/aws"
