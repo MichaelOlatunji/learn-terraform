@@ -27,6 +27,17 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+locals {
+  required_tags = {
+    project     = var.project_name,
+    environment = var.environment
+  }
+  tags = merge(var.resource_tags, local.required_tags)
+}
+locals {
+  name_suffix = "${var.project_name}-${var.environment}"
+}
+
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "2.64.0"
@@ -34,24 +45,21 @@ module "vpc" {
   cidr    = var.vpc_cidr_block
 
   azs             = data.aws_availability_zones.available.names
-  private_subnets = ["10.0.101.0/24", "10.0.102.0/24"]
-  public_subnets  = ["10.0.1.0/24", "10.0.2.0/24"]
+  private_subnets = slice(var.public_subnet_cidr_blocks, 0, var.public_subnet_count)
+  public_subnets  = slice(var.private_subnet_cidr_blocks, 0, var.private_subnet_count)
 
   enable_nat_gateway = true
-  enable_vpn_gateway = false
+  enable_vpn_gateway = var.enable_vpn_gateway
 
-  tags = {
-    terraform   = "true"
-    project     = "project-alpha",
-    environment = "dev"
-  }
+  # tags = var.resource_tags
+  tags = local.tags
 }
 
 module "app_security_group" {
   source  = "terraform-aws-modules/security-group/aws//modules/http-80"
   version = "3.17.0"
 
-  name        = "web-sg-project-alpha-dev"
+  name        = "web-sg-${local.name_suffix}"
   description = "Security group for web-servers with HTTP ports open within VPC"
   vpc_id      = module.vpc.vpc_id
 
@@ -67,7 +75,7 @@ module "lb_security_group" {
   source  = "terraform-aws-modules/security-group/aws//modules/http-80"
   version = "3.17.0"
 
-  name        = "lb-sg-project-alpha-dev"
+  name        = "lb-sg-${local.name_suffix}"
   description = "Security group for load balancer with HTTP ports open within VPC"
   vpc_id      = module.vpc.vpc_id
 
@@ -89,7 +97,7 @@ module "elb_http" {
   version = "2.4.0"
 
   # Ensure load balancer name is unique
-  name = "lb-${random_string.lb_id.result}-project-alpha-dev"
+  name = "lb-${random_string.lb_id.result}-${local.name_suffix}"
 
   internal = false
 
@@ -123,8 +131,8 @@ module "elb_http" {
 module "ec2_instances" {
   source = "./modules/aws-instance"
 
-  instance_count     = 2
-  instance_type      = "t2.micro"
+  instance_count     = var.instance_count
+  instance_type      = var.instance_type
   subnet_ids         = module.vpc.private_subnets[*]
   security_group_ids = [module.app_security_group.this_security_group_id]
 
